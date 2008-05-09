@@ -1,9 +1,22 @@
 #include <httpd.h>
 #include <http_protocol.h>
 #include <http_config.h>
+#include <apache2/http_log.h>
 
+// Configurable options
 const char* DOCUMENT_ROOT="/var/www/";
-const char* SOURCE_ROOT="/home/troy/";
+const char* SOURCE_ROOT="/home/troy/app/";
+const char* MAKEFILE_NAME="/Makefile";
+const char* MAKE_OPTIONS="";
+
+/**
+TODO:
+- Make above params configurable
+- Make sure MAKEFILE_NAME has a leading slash
+- Make sure SOURCE_ROOT has a trailing slash
+- Make sure DOCUMENT_ROOT has a trailing slash
+*/
+
 const size_t MAX_PATH=255;
 
 static int printitem(void *rec, const char *key, const char *value)
@@ -39,69 +52,66 @@ static int make_handler(request_rec *r) {
 	if (!r)
 		return HTTP_INTERNAL_SERVER_ERROR;
 		
-    if (!r->handler || strcmp(r->handler, "make")) {
-        return DECLINED;
-    }
-    // if (r->method_number != M_GET) {
-    //     return HTTP_METHOD_NOT_ALLOWED;
-    // }
-
-	// Determine target: The target is the basename of r->canonical_filename
-	char* make_target=basename(r->canonical_filename);
-	// Determine REL_PATH: the dirname of r->canonical_filename with the Document Root removed
-	char* rel_path=dirname(r->canonical_filename)+strlen(DOCUMENT_ROOT);
-	
 	// Locate Makefile: The Makefile should be in SOURCE_ROOT/REL_PATH/Makefile
-	char* makefile[MAX_PATH];
+	char makefile[MAX_PATH];
 	strncpy(makefile,SOURCE_ROOT,sizeof(makefile)-1);
-	strncat(makefile,rel_path,sizeof(makefile)-strlen(makefile)-1);
-	strncat(makefile,"/Makefile",sizeof(makefile)-strlen(makefile)-1);
+	// Copy the relative part of r->canonical_filename, i.e., the part with the DocumentRoot removed
+	strncat(makefile,r->canonical_filename+strlen(DOCUMENT_ROOT),sizeof(makefile)-strlen(makefile)-1);
+	// Truncate it before the basename
+	char* p=strrchr(makefile,'/');
+	if (!p)
+		return DECLINED; // No decipherable make target, give up
+		
+	*p='\0'; // Truncate it
+	
+	// Determine the make target, i.e., the basename of r->canonical_filename
+	char make_target[32];
+	strncpy(make_target,++p,sizeof(make_target)-1);
+	make_target[sizeof(make_target)-1]='\0';
+		
+	strncat(makefile,MAKEFILE_NAME,sizeof(makefile)-strlen(makefile)-1);
 	makefile[sizeof(makefile)-1]='\0';
 	
 	// If Makefile not found, ignore it (we only care if there •is* a Makefile)
-	struct stat* ss;
+	struct stat ss;
 	if (stat(makefile,&ss)) {
-		// return DECLINED;
+		return DECLINED;
 	}
 
-	// Run Makefile to make target
+	// Build make command
 	char cmd[255];
-	strncpy(cmd,"make -C ",sizeof(cmd));
-	strncat(cmd,dirname(makefile),sizeof(cmd)-strlen(cmd)-1);
+	strncpy(cmd,"make -C ",sizeof(cmd)-1);
+	strncat(cmd,(const char*)dirname(makefile),sizeof(cmd)-strlen(cmd)-1);
+	strncat(cmd,MAKE_OPTIONS,sizeof(cmd)-strlen(cmd)-1);
 	strncat(cmd," ",sizeof(cmd)-strlen(cmd)-1);
 	strncat(cmd,make_target,sizeof(cmd)-strlen(cmd)-1);
 	strncat(cmd," 2>&1",sizeof(cmd)-strlen(cmd)-1);
 	cmd[sizeof(cmd)-1]='\0';
+	
+	// Run Makefile to make target
 	FILE* makep=popen(cmd,"r");
 	if (!makep) { // If launching make fails, output errors from make and return HTTP error
-	    ap_set_content_type(r, "text/html;charset=ascii");
-	    ap_rputs("<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\">\n",r);
-	    ap_rputs("<html><head><title>mod_make</title></head>", r);
-	    ap_rputs("<body><h1>Make:</h1>", r);
-	
-		ap_rputs("Unable to launch make.",r);
-
-	    ap_rputs("</body></html>", r);
-	
+		ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: failed to popen:%s",cmd);
 		return HTTP_INTERNAL_SERVER_ERROR;
 	}
 
-	char make_output[1024];
+	char make_output[1024]="";
 	// Read output of make
 	do {
-		fgets(make_output,sizeof(make_output),makep);
+		fgets(make_output+strlen(make_output),sizeof(make_output)-strlen(make_output),makep);
 	} while(!feof(makep));
+	make_output[sizeof(make_output)-1]='\0';
 	
 	int ret=pclose(makep);
-	if (TRUE||WEXITSTATUS(ret)) {// make did not complete successfully, output make's output and tell Apache to stop.
+	if (WEXITSTATUS(ret)) {// make did not complete successfully, output make's output and tell Apache to stop.
 	    ap_set_content_type(r, "text/html;charset=ascii");
 	    ap_rputs("<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\">\n",r);
 	    ap_rputs("<html><head><title>mod_make</title></head>", r);
 	    ap_rputs("<body><h1>Make:</h1>", r);
 	
-		ap_rprintf(r,"<div>Command:%s</div>",cmd);
-		ap_rprintf(r,"<div>Return code:%d</div>",WEXITSTATUS(ret));
-		ap_rprintf(r,"<div>Output:<div>%s</div></div>",make_output);
+		ap_rprintf(r,"<div id=\"mod_make\"><div id=\"cmd\">%s</div>",cmd,makefile);
+		// ap_rprintf(r,"<div>Return code:%d</div>",WEXITSTATUS(ret));
+		ap_rprintf(r,"<pre id=\"output\">%s</pre></div>",make_output);
 
 		// printtable(r, r->headers_in, "Request Headers", "Header", "Value");
 		// printtable(r, r->headers_out, "Response Headers", "Header", "Value");
@@ -128,7 +138,7 @@ static int make_handler(request_rec *r) {
 }
 
 static void make_hooks(apr_pool_t *pool) {
-    ap_hook_handler(make_handler, NULL, NULL, APR_HOOK_FIRST);
+    ap_hook_fixups(make_handler, NULL, NULL, APR_HOOK_LAST);
 }
 
 module AP_MODULE_DECLARE_DATA make_module = {
