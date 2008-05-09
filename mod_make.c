@@ -15,6 +15,7 @@ TODO:
 - Make sure MAKEFILE_NAME has a leading slash
 - Make sure SOURCE_ROOT has a trailing slash
 - Make sure DOCUMENT_ROOT has a trailing slash
+- Allow a config option to specify file types to include or exclude (so it doesn't try to make .gif files, for example)
 */
 
 const size_t MAX_PATH=255;
