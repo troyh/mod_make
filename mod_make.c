@@ -1,22 +1,51 @@
 #include <httpd.h>
+#include <http_core.h>
 #include <http_protocol.h>
 #include <http_config.h>
 #include <apache2/http_log.h>
 #include <regex.h>
 #include <apr_strings.h>
 
-// Configurable options
-const char* DOCUMENT_ROOT="/var/www";
-const char* SOURCE_ROOT="/home/troy/app"; // MakeSourceRoot
-const char* MAKEFILE_NAME="Makefile"; // MakeFilename
-const char* MAKE_PROG="make"; // MakeProgram
-const char* MAKE_OPTIONS=""; // MakeOptions
-const char* INCLUDE_FILE_TYPES=""; // MakeIncludeFileTypes
-const char* EXCLUDE_FILE_TYPES=""; // MakeExcludeFileTypes
-const char* EXCLUDE_REGEX=""; // MakeExcludeRegex
-const char* MAKEERROR_URI="/mod_make_error"; // MakeErrorURI
-const char* MAKEERROR_CSS=""; // MakeErrorCSS
-// TODO: Make above params configurable
+typedef struct {
+	int onoff;
+	const char* sourceRoot;
+	const char* makefileName;
+	const char* makeProgram;
+	const char* makeOptions;
+	const char* includeFileTypes;
+	const char* excludeFileTypes;
+	const char* excludeRegex;
+	const char* errorURI;
+	const char* errorCSS;
+} dir_cfg;
+
+static const char* cfg_set_filetype(cmd_parms* cmd, void* cfg, const char* val);
+static void* create_dir_conf(apr_pool_t* pool, char* x);
+static void make_hooks(apr_pool_t *pool);
+	
+static const command_rec cmds[]={
+	AP_INIT_FLAG("Make",ap_set_flag_slot,(void*)APR_OFFSETOF(dir_cfg,onoff),ACCESS_CONF|RSRC_CONF,"Enable mod_make"),
+	AP_INIT_TAKE1("MakeSourceRoot",		  ap_set_string_slot, (void*)APR_OFFSETOF(dir_cfg,sourceRoot),	     OR_ALL,"Source root"),
+	AP_INIT_TAKE1("MakeFilename",		  ap_set_string_slot, (void*)APR_OFFSETOF(dir_cfg,makefileName),	 OR_ALL,"Make filename (i.e., Makefile)"),
+	AP_INIT_TAKE1("MakeProgram",		  ap_set_string_slot, (void*)APR_OFFSETOF(dir_cfg,makeProgram),	 OR_ALL,"Make binary"),
+	AP_INIT_TAKE1("MakeOptions",		  ap_set_string_slot, (void*)APR_OFFSETOF(dir_cfg,makeOptions),	 OR_ALL,"Make options"),
+	AP_INIT_ITERATE("MakeIncludeFileTypes", cfg_set_filetype, (void*)APR_OFFSETOF(dir_cfg,includeFileTypes),OR_ALL,"Include file types"),
+	AP_INIT_ITERATE("MakeExcludeFileTypes", cfg_set_filetype, (void*)APR_OFFSETOF(dir_cfg,excludeFileTypes),OR_ALL,"Exclude file types"),
+	AP_INIT_TAKE1("MakeExcludeRegex",	  ap_set_string_slot, (void*)APR_OFFSETOF(dir_cfg,excludeRegex),	 OR_ALL,"Exclude regex"),
+	AP_INIT_TAKE1("MakeErrorURI",		  ap_set_string_slot, (void*)APR_OFFSETOF(dir_cfg,errorURI),		 OR_ALL,"Error URI"),
+	AP_INIT_TAKE1("MakeErrorCSS",		  ap_set_string_slot, (void*)APR_OFFSETOF(dir_cfg,errorCSS),		 OR_ALL,"Error CSS"),
+	{NULL}
+};
+
+module AP_MODULE_DECLARE_DATA make_module = {
+        STANDARD20_MODULE_STUFF,
+        create_dir_conf,
+        NULL,
+        NULL,
+        NULL,
+        cmds,
+        make_hooks
+} ;
 
 /**
  *	Handles the error page, when necessary.
@@ -25,7 +54,8 @@ static int make_handler(request_rec *r) {
 	if (!r || !r->uri)
 		return HTTP_INTERNAL_SERVER_ERROR;
 		
-	if (strcmp(r->uri,MAKEERROR_URI))
+	dir_cfg* cfg=ap_get_module_config(r->per_dir_config,&make_module);
+	if (strcmp(r->uri,cfg->errorURI))
 		return DECLINED;
 		
     ap_set_content_type(r, "text/html;charset=ascii");
@@ -38,7 +68,7 @@ static int make_handler(request_rec *r) {
 		"<link rel=\"stylesheet\" type=\"text/css\" href=\"%s\" />"
 		"</head>"
 		"<body><h1>Make Error:</h1><pre>%s</pre></body></html>",
-		MAKEERROR_CSS,
+		cfg->errorCSS,
 		make_output);
 		
 	return OK;
@@ -53,17 +83,20 @@ static int make_fixup(request_rec *r) {
 	if (r->prev)
 		return DECLINED; // We're running in a sub-request, ignore.
 		
+	dir_cfg* cfg=ap_get_module_config(r->per_dir_config,&make_module);
+	const char* docroot=ap_document_root(r);
+		
 	// TODO: Determine if this is a request I care about, i.e., the following are true:
 	// 1. The file type is in MakeIncludeFileTypes (if specified) and is not in MakeExcludeFileTypes (if specified)
 	// 2. The URI does not match the MakeExcludeRegex expression
 		
-	// Locate Makefile: The Makefile should be in SOURCE_ROOT/REL_PATH/Makefile
+	// Locate Makefile: The Makefile should be in SourceRoot/REL_PATH/Makefile
 	char relpath[256];
 	char makefile[256];
 	char make_target[64];
 
 	// Determine the relative path part of r->canonical_filename, i.e., the part with the DocumentRoot removed
-	strncpy(relpath,r->canonical_filename+strlen(DOCUMENT_ROOT),sizeof(relpath)-1);
+	strncpy(relpath,r->canonical_filename+strlen(docroot),sizeof(relpath)-1);
 	// Truncate it before the basename
 	char* p=strrchr(relpath,'/');
 	if (p)
@@ -74,12 +107,12 @@ static int make_fixup(request_rec *r) {
 	}
 
 	// Determine the make target, i.e., the basename of r->canonical_filename
-	strncpy(make_target,r->canonical_filename+strlen(DOCUMENT_ROOT)+strlen(relpath),sizeof(make_target)-1);
+	strncpy(make_target,r->canonical_filename+strlen(docroot)+strlen(relpath),sizeof(make_target)-1);
 	make_target[sizeof(make_target)-1]='\0';
 	
-	strncpy(makefile,SOURCE_ROOT,sizeof(makefile)-1);
+	strncpy(makefile,cfg->sourceRoot,sizeof(makefile)-1);
 	strncat(makefile,relpath,sizeof(makefile)-strlen(makefile)-1);
-	strncat(makefile,MAKEFILE_NAME,sizeof(makefile)-strlen(makefile)-1);
+	strncat(makefile,cfg->makefileName,sizeof(makefile)-strlen(makefile)-1);
 	makefile[sizeof(makefile)-1]='\0';
 	
 	ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: relpath:%s",relpath);
@@ -94,12 +127,12 @@ static int make_fixup(request_rec *r) {
 
 	// Build make command
 	char* cmd=apr_psprintf(r->pool,"WWWDOCROOT=%s WWWRELPATH=%s %s -f %s -C %s %s %s 2>&1",
-		DOCUMENT_ROOT,
+		docroot,
 		relpath,
-		MAKE_PROG,
-		MAKEFILE_NAME,
+		cfg->makeProgram,
+		cfg->makefileName,
 		(const char*)dirname(makefile),
-		MAKE_OPTIONS,
+		cfg->makeOptions,
 		make_target);
 		
 	ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cmd:%s",cmd);
@@ -159,7 +192,7 @@ static int make_fixup(request_rec *r) {
 		// Store make_output in request_rec so that the handler can display it 
 		apr_table_set(r->notes,"make_output",make_output);
 		// Redirect to our own content handler
-		ap_internal_redirect(MAKEERROR_URI,r);
+		ap_internal_redirect(cfg->errorURI,r);
 		return OK;
 	}
 	
@@ -171,12 +204,25 @@ static void make_hooks(apr_pool_t *pool) {
     ap_hook_handler(make_handler, NULL, NULL, APR_HOOK_FIRST);
 }
 
-module AP_MODULE_DECLARE_DATA make_module = {
-        STANDARD20_MODULE_STUFF,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        make_hooks
-} ;
+/**
+ * Configuration functions
+ */
+static void* create_dir_conf(apr_pool_t* pool, char* x) {
+	dir_cfg* cfg=(dir_cfg*)apr_pcalloc(pool,sizeof(dir_cfg));
+	// Set defaults
+	cfg->sourceRoot="./";
+	cfg->makefileName="Makefile";
+	cfg->makeProgram="make";
+	cfg->makeOptions="";
+	cfg->includeFileTypes="";
+	cfg->excludeFileTypes="";
+	cfg->excludeRegex="";
+	cfg->errorURI="/mod_make_error";
+	cfg->errorCSS="";
+}
+
+static const char* cfg_set_filetype(cmd_parms* cmd, void* cfg, const char* val) {
+	int offset=(int)(long)cmd->info;
+	// *((const char**)(char*)cfg+offset)=val;
+	return NULL;
+}
