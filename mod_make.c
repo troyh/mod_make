@@ -15,20 +15,8 @@ const char* INCLUDE_FILE_TYPES=""; // MakeIncludeFileTypes
 const char* EXCLUDE_FILE_TYPES=""; // MakeExcludeFileTypes
 const char* EXCLUDE_REGEX=""; // MakeExcludeRegex
 const char* MAKEERROR_URI="/mod_make_error"; // MakeErrorURI
-
-/**
-TODO:
-- Make above params configurable
-- Allow a config option to specify file types to include or exclude (so it doesn't try to make .gif files, for example)
-- Handle non-existent make targets gracefully. We have to run make, but if it says something like the following, silently fail:
-
-	make: Entering directory `/home/troy/app'
-	make: *** No rule to make target `blah.html'.  Stop.
-	make: Leaving directory `/home/troy/app'
-
-*/
-
-const size_t MAX_PATH=255; // TODO: use OS' equivalent
+const char* MAKEERROR_CSS=""; // MakeErrorCSS
+// TODO: Make above params configurable
 
 /**
  *	Handles the error page, when necessary.
@@ -41,15 +29,17 @@ static int make_handler(request_rec *r) {
 		return DECLINED;
 		
     ap_set_content_type(r, "text/html;charset=ascii");
-    ap_rputs("<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\">\n",r);
-    ap_rputs("<html><head><title>mod_make</title></head>", r);
-    ap_rputs("<body><h1>Make Error:</h1>", r);
 
 	const char* make_output=apr_table_get(r->prev->notes,"make_output");
 	// ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make handler:make_output:%s",make_output);
-	ap_rprintf(r,"<pre>%s</pre>",make_output);
-
-    ap_rputs("</body></html>", r);
+	ap_rprintf(r,
+		"<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\">\n"
+		"<html><head><title>mod_make</title>"
+		"<link rel=\"stylesheet\" type=\"text/css\" href=\"%s\" />"
+		"</head>"
+		"<body><h1>Make Error:</h1><pre>%s</pre></body></html>",
+		MAKEERROR_CSS,
+		make_output);
 		
 	return OK;
 }
@@ -68,8 +58,8 @@ static int make_fixup(request_rec *r) {
 	// 2. The URI does not match the MakeExcludeRegex expression
 		
 	// Locate Makefile: The Makefile should be in SOURCE_ROOT/REL_PATH/Makefile
-	char relpath[MAX_PATH];
-	char makefile[MAX_PATH];
+	char relpath[256];
+	char makefile[256];
 	char make_target[64];
 
 	// Determine the relative path part of r->canonical_filename, i.e., the part with the DocumentRoot removed
@@ -124,7 +114,11 @@ static int make_fixup(request_rec *r) {
 	// Compile regex
 	regex_t regex;
 	// if (regcomp(&regex,"make: \\*\\*\\* No rule to make target `.+'\\. Stop\\.",0)) {
-	if (regcomp(&regex,"No rule to make target",0)) {
+	char* regexstr=apr_psprintf(r->pool,
+		"^make:[[:space:]]+\\*\\*\\*[[:space:]]+No[[:space:]]+rule[[:space:]]+to[[:space:]]+make[[:space:]]+target[[:space:]]+`%s'\\.[[:space:]]+Stop\\.",
+		make_target
+		);
+	if (regcomp(&regex,regexstr,REG_EXTENDED)) {
 		ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: regcomp failed");
 		return HTTP_INTERNAL_SERVER_ERROR;
 	}
@@ -157,7 +151,6 @@ static int make_fixup(request_rec *r) {
 	ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: make exit code:%d",WEXITSTATUS(ret));
 	
 	if (WEXITSTATUS(ret)) {// make did not complete successfully, output make's output and tell Apache to stop.
-		// TODO: Look for regex 'make: \*\*\* No rule to make target `[TARGET]'' and if found, silently fail
 		if (bSilentFail) {
 			ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: silently failing.");
 			return DECLINED;
