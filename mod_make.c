@@ -14,7 +14,7 @@ typedef struct {
 	const char* makeOptions;
 	const char* includeFileTypes;
 	const char* excludeFileTypes;
-	const char* excludeRegex;
+	// const char* excludeRegex;
 	const char* errorURI;
 	const char* errorCSS;
 } dir_cfg;
@@ -31,7 +31,7 @@ static const command_rec cmds[]={
 	AP_INIT_TAKE1("MakeOptions",		  ap_set_string_slot, (void*)APR_OFFSETOF(dir_cfg,makeOptions),	    OR_ALL,"Make options"),
 	AP_INIT_ITERATE("MakeIncludeFileTypes", cfg_set_filetype, (void*)APR_OFFSETOF(dir_cfg,includeFileTypes),OR_ALL,"Include file types"),
 	AP_INIT_ITERATE("MakeExcludeFileTypes", cfg_set_filetype, (void*)APR_OFFSETOF(dir_cfg,excludeFileTypes),OR_ALL,"Exclude file types"),
-	AP_INIT_TAKE1("MakeExcludeRegex",	  ap_set_string_slot, (void*)APR_OFFSETOF(dir_cfg,excludeRegex),	OR_ALL,"Exclude regex"),
+	// AP_INIT_TAKE1("MakeExcludeRegex",	  ap_set_string_slot, (void*)APR_OFFSETOF(dir_cfg,excludeRegex),	OR_ALL,"Exclude regex"),
 	AP_INIT_TAKE1("MakeErrorURI",		  ap_set_string_slot, (void*)APR_OFFSETOF(dir_cfg,errorURI),		OR_ALL,"Error URI"),
 	AP_INIT_TAKE1("MakeErrorCSS",		  ap_set_string_slot, (void*)APR_OFFSETOF(dir_cfg,errorCSS),		OR_ALL,"Error CSS"),
 	{NULL}
@@ -84,6 +84,9 @@ static int make_fixup(request_rec *r) {
 		return DECLINED; // We're running in a sub-request, ignore.
 		
 	dir_cfg* cfg=ap_get_module_config(r->per_dir_config,&make_module);
+	if (!cfg->onoff) // Is module turned on?
+		return DECLINED;
+		
 	const char* docroot=ap_document_root(r);
 	
 	ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:onoff:%d",cfg->onoff);
@@ -93,13 +96,25 @@ static int make_fixup(request_rec *r) {
 	ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:makeOptions:%s",cfg->makeOptions);
 	ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:includeFileTypes:%s",cfg->includeFileTypes);
 	ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:excludeFileTypes:%s",cfg->excludeFileTypes);
-	ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:excludeRegex:%s",cfg->excludeRegex);
+	// ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:excludeRegex:%s",cfg->excludeRegex);
 	ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:errorURI:%s",cfg->errorURI);
 	ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:errorCSS:%s",cfg->errorCSS);
 	
-	// TODO: Determine if this is a request I care about, i.e., the following are true:
-	// 1. The file type is in MakeIncludeFileTypes (if specified) and is not in MakeExcludeFileTypes (if specified)
-	// 2. The URI does not match the MakeExcludeRegex expression
+	// Determine if this is a request I care about, i.e., the following is true:
+	// The file type is in MakeIncludeFileTypes (if specified) and is not in MakeExcludeFileTypes (if specified)
+	if (cfg->includeFileTypes || cfg->excludeFileTypes) {
+		// Get file extension
+		char* fname=basename(r->canonical_filename);
+		char* ext=strchr(fname,'.');
+		if (ext) {
+			if (cfg->includeFileTypes && !strcasestr(cfg->includeFileTypes,ext)) {
+				return DECLINED;
+			}
+			if (cfg->excludeFileTypes && strcasestr(cfg->excludeFileTypes,ext)) {
+				return DECLINED;
+			}
+		}
+	}
 		
 	// Locate Makefile: The Makefile should be in SourceRoot/REL_PATH/Makefile
 	char relpath[256];
@@ -157,7 +172,6 @@ static int make_fixup(request_rec *r) {
 
 	// Compile regex
 	regex_t regex;
-	// if (regcomp(&regex,"make: \\*\\*\\* No rule to make target `.+'\\. Stop\\.",0)) {
 	char* regexstr=apr_psprintf(r->pool,
 		"^make:[[:space:]]+\\*\\*\\*[[:space:]]+No[[:space:]]+rule[[:space:]]+to[[:space:]]+make[[:space:]]+target[[:space:]]+`%s'\\.[[:space:]]+Stop\\.",
 		make_target
@@ -225,9 +239,9 @@ static void* create_dir_conf(apr_pool_t* pool, char* x) {
 	cfg->makefileName="Makefile";
 	cfg->makeProgram="make";
 	cfg->makeOptions="";
-	cfg->includeFileTypes="";
-	cfg->excludeFileTypes="";
-	cfg->excludeRegex="";
+	cfg->includeFileTypes=0;
+	cfg->excludeFileTypes=0;
+	// cfg->excludeRegex="";
 	cfg->errorURI="/mod_make_error";
 	cfg->errorCSS="";
 	
@@ -236,6 +250,11 @@ static void* create_dir_conf(apr_pool_t* pool, char* x) {
 
 static const char* cfg_set_filetype(cmd_parms* cmd, void* cfg, const char* val) {
 	int offset=(int)(long)cmd->info;
-	// *((const char**)(char*)cfg+offset)=val;
+	char* str=*(char**)((char*)cfg+offset);
+	if (!str)
+		str=apr_pstrcat(cmd->pool,val,NULL);
+	else
+		str=apr_pstrcat(cmd->pool,str," ",val,NULL);
+	*(char**)((char*)cfg+offset)=str;
 	return NULL;
 }
