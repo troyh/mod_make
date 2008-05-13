@@ -24,16 +24,16 @@ static void* create_dir_conf(apr_pool_t* pool, char* x);
 static void make_hooks(apr_pool_t *pool);
 	
 static const command_rec cmds[]={
-	AP_INIT_FLAG("Make",ap_set_flag_slot,(void*)APR_OFFSETOF(dir_cfg,onoff),ACCESS_CONF|RSRC_CONF,"Enable mod_make"),
-	AP_INIT_TAKE1("MakeSourceRoot",		  ap_set_string_slot, (void*)APR_OFFSETOF(dir_cfg,sourceRoot),	     OR_ALL,"Source root"),
-	AP_INIT_TAKE1("MakeFilename",		  ap_set_string_slot, (void*)APR_OFFSETOF(dir_cfg,makefileName),	 OR_ALL,"Make filename (i.e., Makefile)"),
-	AP_INIT_TAKE1("MakeProgram",		  ap_set_string_slot, (void*)APR_OFFSETOF(dir_cfg,makeProgram),	 OR_ALL,"Make binary"),
-	AP_INIT_TAKE1("MakeOptions",		  ap_set_string_slot, (void*)APR_OFFSETOF(dir_cfg,makeOptions),	 OR_ALL,"Make options"),
+	AP_INIT_FLAG("Make",				  ap_set_flag_slot,   (void*)APR_OFFSETOF(dir_cfg,onoff),	        OR_ALL,"Enable mod_make"),
+	AP_INIT_TAKE1("MakeSourceRoot",		  ap_set_string_slot, (void*)APR_OFFSETOF(dir_cfg,sourceRoot),	    OR_ALL,"Source root"),
+	AP_INIT_TAKE1("MakeFilename",		  ap_set_string_slot, (void*)APR_OFFSETOF(dir_cfg,makefileName),    OR_ALL,"Make filename (i.e., Makefile)"),
+	AP_INIT_TAKE1("MakeProgram",		  ap_set_string_slot, (void*)APR_OFFSETOF(dir_cfg,makeProgram),	    OR_ALL,"Make binary"),
+	AP_INIT_TAKE1("MakeOptions",		  ap_set_string_slot, (void*)APR_OFFSETOF(dir_cfg,makeOptions),	    OR_ALL,"Make options"),
 	AP_INIT_ITERATE("MakeIncludeFileTypes", cfg_set_filetype, (void*)APR_OFFSETOF(dir_cfg,includeFileTypes),OR_ALL,"Include file types"),
 	AP_INIT_ITERATE("MakeExcludeFileTypes", cfg_set_filetype, (void*)APR_OFFSETOF(dir_cfg,excludeFileTypes),OR_ALL,"Exclude file types"),
-	AP_INIT_TAKE1("MakeExcludeRegex",	  ap_set_string_slot, (void*)APR_OFFSETOF(dir_cfg,excludeRegex),	 OR_ALL,"Exclude regex"),
-	AP_INIT_TAKE1("MakeErrorURI",		  ap_set_string_slot, (void*)APR_OFFSETOF(dir_cfg,errorURI),		 OR_ALL,"Error URI"),
-	AP_INIT_TAKE1("MakeErrorCSS",		  ap_set_string_slot, (void*)APR_OFFSETOF(dir_cfg,errorCSS),		 OR_ALL,"Error CSS"),
+	AP_INIT_TAKE1("MakeExcludeRegex",	  ap_set_string_slot, (void*)APR_OFFSETOF(dir_cfg,excludeRegex),	OR_ALL,"Exclude regex"),
+	AP_INIT_TAKE1("MakeErrorURI",		  ap_set_string_slot, (void*)APR_OFFSETOF(dir_cfg,errorURI),		OR_ALL,"Error URI"),
+	AP_INIT_TAKE1("MakeErrorCSS",		  ap_set_string_slot, (void*)APR_OFFSETOF(dir_cfg,errorCSS),		OR_ALL,"Error CSS"),
 	{NULL}
 };
 
@@ -85,7 +85,18 @@ static int make_fixup(request_rec *r) {
 		
 	dir_cfg* cfg=ap_get_module_config(r->per_dir_config,&make_module);
 	const char* docroot=ap_document_root(r);
-		
+	
+	ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:onoff:%d",cfg->onoff);
+	ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:sourceRoot:%s",cfg->sourceRoot);
+	ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:makefileName:%s",cfg->makefileName);
+	ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:makeProgram:%s",cfg->makeProgram);
+	ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:makeOptions:%s",cfg->makeOptions);
+	ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:includeFileTypes:%s",cfg->includeFileTypes);
+	ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:excludeFileTypes:%s",cfg->excludeFileTypes);
+	ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:excludeRegex:%s",cfg->excludeRegex);
+	ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:errorURI:%s",cfg->errorURI);
+	ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:errorCSS:%s",cfg->errorCSS);
+	
 	// TODO: Determine if this is a request I care about, i.e., the following are true:
 	// 1. The file type is in MakeIncludeFileTypes (if specified) and is not in MakeExcludeFileTypes (if specified)
 	// 2. The URI does not match the MakeExcludeRegex expression
@@ -96,7 +107,7 @@ static int make_fixup(request_rec *r) {
 	char make_target[64];
 
 	// Determine the relative path part of r->canonical_filename, i.e., the part with the DocumentRoot removed
-	strncpy(relpath,r->canonical_filename+strlen(docroot),sizeof(relpath)-1);
+	strncpy(relpath,r->canonical_filename+strlen(docroot)-1,sizeof(relpath)-1);
 	// Truncate it before the basename
 	char* p=strrchr(relpath,'/');
 	if (p)
@@ -107,7 +118,7 @@ static int make_fixup(request_rec *r) {
 	}
 
 	// Determine the make target, i.e., the basename of r->canonical_filename
-	strncpy(make_target,r->canonical_filename+strlen(docroot)+strlen(relpath),sizeof(make_target)-1);
+	strncpy(make_target,r->canonical_filename+strlen(docroot)-1+strlen(relpath),sizeof(make_target)-1);
 	make_target[sizeof(make_target)-1]='\0';
 	
 	strncpy(makefile,cfg->sourceRoot,sizeof(makefile)-1);
@@ -219,6 +230,8 @@ static void* create_dir_conf(apr_pool_t* pool, char* x) {
 	cfg->excludeRegex="";
 	cfg->errorURI="/mod_make_error";
 	cfg->errorCSS="";
+	
+	return cfg;
 }
 
 static const char* cfg_set_filetype(cmd_parms* cmd, void* cfg, const char* val) {
