@@ -17,6 +17,7 @@ typedef struct {
 	// const char* excludeRegex;
 	const char* errorURI;
 	const char* errorCSS;
+	int debug;
 } dir_cfg;
 
 static const char* cfg_set_filetype(cmd_parms* cmd, void* cfg, const char* val);
@@ -34,6 +35,7 @@ static const command_rec cmds[]={
 	// AP_INIT_TAKE1("MakeExcludeRegex",	  ap_set_string_slot, (void*)APR_OFFSETOF(dir_cfg,excludeRegex),	OR_ALL,"Exclude regex"),
 	AP_INIT_TAKE1("MakeErrorURI",		  ap_set_string_slot, (void*)APR_OFFSETOF(dir_cfg,errorURI),		OR_ALL,"Error URI"),
 	AP_INIT_TAKE1("MakeErrorCSS",		  ap_set_string_slot, (void*)APR_OFFSETOF(dir_cfg,errorCSS),		OR_ALL,"Error CSS"),
+	AP_INIT_FLAG("MakeDebug",			  ap_set_flag_slot,   (void*)APR_OFFSETOF(dir_cfg,debug),	        OR_ALL,"Enable mod_make debug mode"),
 	{NULL}
 };
 
@@ -88,17 +90,19 @@ static int make_fixup(request_rec *r) {
 		return DECLINED;
 		
 	const char* docroot=ap_document_root(r);
-	
-	ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:onoff:%d",cfg->onoff);
-	ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:sourceRoot:%s",cfg->sourceRoot);
-	ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:makefileName:%s",cfg->makefileName);
-	ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:makeProgram:%s",cfg->makeProgram);
-	ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:makeOptions:%s",cfg->makeOptions);
-	ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:includeFileTypes:%s",cfg->includeFileTypes);
-	ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:excludeFileTypes:%s",cfg->excludeFileTypes);
-	// ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:excludeRegex:%s",cfg->excludeRegex);
-	ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:errorURI:%s",cfg->errorURI);
-	ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:errorCSS:%s",cfg->errorCSS);
+
+	if (cfg->debug) {
+		ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:onoff:%d",cfg->onoff);
+		ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:sourceRoot:%s",cfg->sourceRoot);
+		ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:makefileName:%s",cfg->makefileName);
+		ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:makeProgram:%s",cfg->makeProgram);
+		ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:makeOptions:%s",cfg->makeOptions);
+		ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:includeFileTypes:%s",cfg->includeFileTypes);
+		ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:excludeFileTypes:%s",cfg->excludeFileTypes);
+		// ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:excludeRegex:%s",cfg->excludeRegex);
+		ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:errorURI:%s",cfg->errorURI);
+		ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:errorCSS:%s",cfg->errorCSS);
+	}
 	
 	// Determine if this is a request I care about, i.e., the following is true:
 	// The file type is in MakeIncludeFileTypes (if specified) and is not in MakeExcludeFileTypes (if specified)
@@ -141,9 +145,11 @@ static int make_fixup(request_rec *r) {
 	strncat(makefile,cfg->makefileName,sizeof(makefile)-strlen(makefile)-1);
 	makefile[sizeof(makefile)-1]='\0';
 	
-	ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: relpath:%s",relpath);
-	ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: makefile:%s",makefile);
-	ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: make_target:%s",make_target);
+	if (cfg->debug) {
+		ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: relpath:%s",relpath);
+		ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: makefile:%s",makefile);
+		ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: make_target:%s",make_target);
+	}
 	
 	// If Makefile not found, ignore it (we only care if there •is* a Makefile)
 	struct stat ss;
@@ -160,13 +166,15 @@ static int make_fixup(request_rec *r) {
 		(const char*)dirname(makefile),
 		cfg->makeOptions,
 		make_target);
-		
-	ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cmd:%s",cmd);
+
+	if (cfg->debug)
+		ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cmd:%s",cmd);
 	
 	// Run Makefile to make target
 	FILE* makep=popen(cmd,"r");
 	if (!makep) { // If launching make fails, output errors from make and return HTTP error
-		ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: failed to popen:%s",cmd);
+		if (cfg->debug)
+			ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: failed to popen:%s",cmd);
 		return HTTP_INTERNAL_SERVER_ERROR;
 	}
 
@@ -177,7 +185,8 @@ static int make_fixup(request_rec *r) {
 		make_target
 		);
 	if (regcomp(&regex,regexstr,REG_EXTENDED)) {
-		ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: regcomp failed");
+		if (cfg->debug)
+			ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: regcomp failed");
 		return HTTP_INTERNAL_SERVER_ERROR;
 	}
 	
@@ -192,25 +201,36 @@ static int make_fixup(request_rec *r) {
 	do {
 		const char* newp=fgets(p,make_output_size,makep);
 		if (newp) {
+			if (cfg->debug)
+				ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: make output:%s",newp);
 			make_output_size-=strlen(newp);
 			p+=strlen(newp);
 			
 			if (regexec(&regex,newp,0,0,0)==0) {
-				ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: regex match:%s",newp);
+				if (cfg->debug)
+					ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: regex match:%s",newp);
 				bSilentFail=TRUE;
 			}
 
 		}
 	}
-	while (!feof(makep));
+	while (!feof(makep) && make_output_size>1);
+	
+	if (!make_output_size) {
+		if (cfg->debug)
+			ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: make output exceeded max length");
+		// TODO: add appropriate message to make_output
+	}
 
 	int ret=pclose(makep);
 	
-	ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: make exit code:%d",WEXITSTATUS(ret));
+	if (cfg->debug)
+		ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: make exit code:%d",WEXITSTATUS(ret));
 	
 	if (WEXITSTATUS(ret)) {// make did not complete successfully, output make's output and tell Apache to stop.
 		if (bSilentFail) {
-			ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: silently failing.");
+			if (cfg->debug)
+				ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: silently failing.");
 			return DECLINED;
 		}
 		
@@ -244,6 +264,7 @@ static void* create_dir_conf(apr_pool_t* pool, char* x) {
 	// cfg->excludeRegex="";
 	cfg->errorURI="/mod_make_error";
 	cfg->errorCSS="";
+	cfg->debug=0;
 	
 	return cfg;
 }
