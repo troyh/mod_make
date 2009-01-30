@@ -102,6 +102,8 @@ static int make_fixup(request_rec *r) {
 		// ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:excludeRegex:%s",cfg->excludeRegex);
 		ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:errorURI:%s",cfg->errorURI);
 		ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:errorCSS:%s",cfg->errorCSS);
+		ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: DocumentRoot:%s",docroot);
+		ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: Canonical Filename:%s",r->canonical_filename);
 	}
 	
 	// Determine if this is a request I care about, i.e., the following is true:
@@ -140,7 +142,10 @@ static int make_fixup(request_rec *r) {
 	strncpy(make_target,r->canonical_filename+strlen(docroot)-1+strlen(relpath),sizeof(make_target)-1);
 	make_target[sizeof(make_target)-1]='\0';
 	
-	strncpy(makefile,cfg->sourceRoot,sizeof(makefile)-1);
+	if (strlen(cfg->sourceRoot))
+		strncpy(makefile,cfg->sourceRoot,sizeof(makefile)-1);
+	else
+		strncpy(makefile,docroot,sizeof(makefile)-1);
 	strncat(makefile,relpath,sizeof(makefile)-strlen(makefile)-1);
 	strncat(makefile,cfg->makefileName,sizeof(makefile)-strlen(makefile)-1);
 	makefile[sizeof(makefile)-1]='\0';
@@ -154,6 +159,9 @@ static int make_fixup(request_rec *r) {
 	// If Makefile not found, ignore it (we only care if there •is* a Makefile)
 	struct stat ss;
 	if (stat(makefile,&ss)) {
+		if (cfg->debug)
+			ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: Makefile not found:%s",makefile);
+			
 		return DECLINED;
 	}
 
@@ -255,7 +263,7 @@ static void make_hooks(apr_pool_t *pool) {
 static void* create_dir_conf(apr_pool_t* pool, char* x) {
 	dir_cfg* cfg=(dir_cfg*)apr_pcalloc(pool,sizeof(dir_cfg));
 	// Set defaults
-	cfg->sourceRoot="./";
+	cfg->sourceRoot="";
 	cfg->makefileName="Makefile";
 	cfg->makeProgram="make";
 	cfg->makeOptions="";
