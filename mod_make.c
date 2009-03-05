@@ -125,10 +125,10 @@ static int make_fixup(request_rec *r) {
 	// Locate Makefile: The Makefile should be in SourceRoot/REL_PATH/Makefile
 	char relpath[256];
 	char makefile[256];
-	char make_target[64];
+	char make_target[256];
 
 	// Determine the relative path part of r->canonical_filename, i.e., the part with the DocumentRoot removed
-	strncpy(relpath,r->canonical_filename+strlen(docroot)-1,sizeof(relpath)-1);
+	strncpy(relpath,r->canonical_filename+strlen(docroot),sizeof(relpath)-1);
 	// Truncate it before the basename
 	char* p=strrchr(relpath,'/');
 	if (p)
@@ -138,33 +138,75 @@ static int make_fixup(request_rec *r) {
 		relpath[1]='\0';
 	}
 
-	// Determine the make target, i.e., the basename of r->canonical_filename
-	strncpy(make_target,r->canonical_filename+strlen(docroot)-1+strlen(relpath),sizeof(make_target)-1);
-	make_target[sizeof(make_target)-1]='\0';
+	if (cfg->debug) {
+		ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: relpath:%s",relpath);
+	}
 	
-	if (strlen(cfg->sourceRoot))
-		strncpy(makefile,cfg->sourceRoot,sizeof(makefile)-1);
-	else
-		strncpy(makefile,docroot,sizeof(makefile)-1);
-	strncat(makefile,relpath,sizeof(makefile)-strlen(makefile)-1);
-	strncat(makefile,cfg->makefileName,sizeof(makefile)-strlen(makefile)-1);
-	makefile[sizeof(makefile)-1]='\0';
+	size_t relpath_len=strlen(relpath);
+	int bFoundMakefile=FALSE;
+	int bGiveUp=FALSE;
 	
+	do
+	{
+		// Determine the make target, i.e., the basename of r->canonical_filename
+		strncpy(make_target,r->canonical_filename+strlen(docroot)+relpath_len,sizeof(make_target)-1);
+		make_target[sizeof(make_target)-1]='\0';
+
+		if (strlen(cfg->sourceRoot))
+			strncpy(makefile,cfg->sourceRoot,sizeof(makefile)-1);
+		else
+			strncpy(makefile,docroot,sizeof(makefile)-1);
+		size_t makefile_len=strlen(makefile);
+		strncat(makefile,relpath,sizeof(makefile)-strlen(makefile)-1);
+		makefile[makefile_len+relpath_len]='\0';
+		strncat(makefile,cfg->makefileName,sizeof(makefile)-strlen(makefile)-1);
+		makefile[sizeof(makefile)-1]='\0';
+	
+		// If Makefile not found, ignore it (we only care if there •is* a Makefile)
+		struct stat ss;
+		if (!stat(makefile,&ss))
+			bFoundMakefile=TRUE;
+		else
+		{
+			if (cfg->debug)
+				ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: Makefile not found:%s. Trying parent directory...",makefile);
+			
+			// Go up one dir until we find a Makefile (but don't go past cfg->sourceRoot)
+			// Take a directory off relpath, move it to the start of make_target and retry looking for the Makefile
+			// Find 2nd-to-last / in relpath, that's the start of the last directory name
+			char* p=strrchr(relpath,'/');
+			if (p)
+			{
+				do
+					--p;
+				while (p>=relpath && *p!='/');
+				
+				if (p>=relpath)
+					relpath_len=p-relpath+1;
+				else
+					bGiveUp=TRUE;
+			}
+			else
+				bGiveUp=TRUE;
+		}
+	}
+	while (bFoundMakefile==FALSE && bGiveUp==FALSE);
+	
+	if (bFoundMakefile==FALSE) // Never found a Makefile
+	{
+		if (cfg->debug)
+			ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: Unable to find a Makefile named:%s",cfg->makefileName);
+		return DECLINED;
+	}
+
 	if (cfg->debug) {
 		ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: relpath:%s",relpath);
 		ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: makefile:%s",makefile);
 		ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: make_target:%s",make_target);
 	}
-	
-	// If Makefile not found, ignore it (we only care if there •is* a Makefile)
-	struct stat ss;
-	if (stat(makefile,&ss)) {
-		if (cfg->debug)
-			ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: Makefile not found:%s",makefile);
-			
-		return DECLINED;
-	}
 
+	// Truncate relpath at relpath_len chars so that WWWRELPATH is the correct path
+	relpath[relpath_len]='\0';
 	// Build make command
 	char* cmd=apr_psprintf(r->pool,"WWWDOCROOT=%s WWWRELPATH=%s %s -f %s -C %s %s %s 2>&1",
 		docroot,
