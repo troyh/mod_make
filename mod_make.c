@@ -103,6 +103,7 @@ static int make_fixup(request_rec *r) {
 		ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:errorURI:%s",cfg->errorURI);
 		ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: cfg:errorCSS:%s",cfg->errorCSS);
 		ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: DocumentRoot:%s",docroot);
+		ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: URI:%s",r->uri);
 		ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: Canonical Filename:%s",r->canonical_filename);
 	}
 	

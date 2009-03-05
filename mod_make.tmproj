@@ -2,8 +2,6 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>currentDocument</key>
-	<string>mod_make.c</string>
 	<key>documents</key>
 	<array>
 		<dict>
@@ -16,7 +14,7 @@
 			<key>filename</key>
 			<string>mod_make.c</string>
 			<key>lastUsed</key>
-			<date>2009-02-12T20:35:20Z</date>
+			<date>2009-03-05T01:09:46Z</date>
 			<key>selected</key>
 			<true/>
 		</dict>
@@ -24,29 +22,10 @@
 	<key>fileHierarchyDrawerWidth</key>
 	<integer>200</integer>
 	<key>metaData</key>
-	<dict>
-		<key>mod_make.c</key>
-		<dict>
-			<key>caret</key>
-			<dict>
-				<key>column</key>
-				<integer>58</integer>
-				<key>line</key>
-				<integer>141</integer>
-			</dict>
-			<key>firstVisibleColumn</key>
-			<integer>0</integer>
-			<key>firstVisibleLine</key>
-			<integer>90</integer>
-		</dict>
-	</dict>
-	<key>openDocuments</key>
-	<array>
-		<string>mod_make.c</string>
-	</array>
+	<dict/>
 	<key>showFileHierarchyDrawer</key>
 	<true/>
 	<key>windowFrame</key>
-	<string>{{1368, 224}, {1030, 1054}}</string>
+	<string>{{1194, 524}, {1030, 1054}}</string>
 </dict>
 </plist>
