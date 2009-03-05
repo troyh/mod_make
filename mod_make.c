@@ -142,23 +142,20 @@ static int make_fixup(request_rec *r) {
 		ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: relpath:%s",relpath);
 	}
 	
-	size_t relpath_len=strlen(relpath);
 	int bFoundMakefile=FALSE;
 	int bGiveUp=FALSE;
 	
 	do
 	{
 		// Determine the make target, i.e., the basename of r->canonical_filename
-		strncpy(make_target,r->canonical_filename+strlen(docroot)+relpath_len,sizeof(make_target)-1);
+		strncpy(make_target,r->canonical_filename+strlen(docroot)+strlen(relpath),sizeof(make_target)-1);
 		make_target[sizeof(make_target)-1]='\0';
 
 		if (strlen(cfg->sourceRoot))
 			strncpy(makefile,cfg->sourceRoot,sizeof(makefile)-1);
 		else
 			strncpy(makefile,docroot,sizeof(makefile)-1);
-		size_t makefile_len=strlen(makefile);
 		strncat(makefile,relpath,sizeof(makefile)-strlen(makefile)-1);
-		makefile[makefile_len+relpath_len]='\0';
 		strncat(makefile,cfg->makefileName,sizeof(makefile)-strlen(makefile)-1);
 		makefile[sizeof(makefile)-1]='\0';
 	
@@ -182,7 +179,7 @@ static int make_fixup(request_rec *r) {
 				while (p>=relpath && *p!='/');
 				
 				if (p>=relpath)
-					relpath_len=p-relpath+1;
+					*(p+1)='\0';
 				else
 					bGiveUp=TRUE;
 			}
@@ -205,8 +202,6 @@ static int make_fixup(request_rec *r) {
 		ap_log_rerror(APLOG_MARK,APLOG_ERR,0,r,"mod_make: make_target:%s",make_target);
 	}
 
-	// Truncate relpath at relpath_len chars so that WWWRELPATH is the correct path
-	relpath[relpath_len]='\0';
 	// Build make command
 	char* cmd=apr_psprintf(r->pool,"WWWDOCROOT=%s WWWRELPATH=%s %s -f %s -C %s %s %s 2>&1",
 		docroot,
